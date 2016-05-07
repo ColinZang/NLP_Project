@@ -100,6 +100,191 @@ public class Scorer {
         System.out.println("The parsing accuracy is " + (double)correct / total);
     }
 
+    private void runParseval(String ownFile) {
+        int total = 0;
+        int correctOwnRule = 0;
+        int correctGoldRule = 0;
+        int totalOwnRule = 0;
+        try {
+            BufferedReader reader = new BufferedReader(new FileReader(ownFile));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (total > goldSentences.size() - 1) {
+                    System.out.println("The number of lines don't match");
+                    return;
+                }
+                System.out.println("gold parse:");
+                System.out.println(goldSentences.get(total));
+                System.out.println("own parse:");
+                System.out.println(line);
+                MyNode rootOne = getTree(line);
+                MyNode rootTwo = getTree(goldSentences.get(total));
+                List<String> ownRules = countRules(rootOne);
+                List<String> goldRules = countRules(rootTwo);
+                HashMap<String, Integer> gold = new HashMap<String, Integer>();
+                for (String s: goldRules) {
+                    if (gold.containsKey(s)) {
+                        gold.put(s, gold.get(s) + 1);
+                    }
+                    else {
+                        gold.put(s, 1);
+                    }
+                }
+                HashMap<String, Integer> own = new HashMap<String, Integer>();
+                for (String s: ownRules) {
+                    if (own.containsKey(s)) {
+                        own.put(s, own.get(s) + 1);
+                    }
+                    else {
+                        own.put(s, 1);
+                    }
+                }
+                int original = correctOwnRule;
+                for (Map.Entry<String, Integer> entry: own.entrySet()) {
+                    String s = entry.getKey();
+                    int count = entry.getValue();
+                    if (!gold.containsKey(s)) {
+                        continue;
+                    }
+                    correctOwnRule += Math.min(gold.get(s), count);
+                }
+                System.out.println(goldRules.size());
+                System.out.println(ownRules.size());
+                System.out.println(correctOwnRule - original);
+                correctGoldRule += goldRules.size();
+                totalOwnRule += ownRules.size();
+                total++;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        System.out.println(correctOwnRule);
+        System.out.println(totalOwnRule);
+        System.out.println(correctGoldRule);
+        double precision = (double)correctOwnRule / totalOwnRule;
+        double recall = (double)correctOwnRule / correctGoldRule;
+        double F = 2 * precision * recall / (precision + recall);
+        System.out.println("precision is " + precision);
+        System.out.println("recall is " + recall);
+        System.out.println("F is " + F);
+    }
+
+    private MyNode getTree(String sentence) {
+        Stack<MyNode> tagStack = new Stack<MyNode>();
+        int bracket = 0;
+        String token = "";
+        MyNode root = null;
+        for (int i = 0; i < sentence.length(); i++) {
+            if (sentence.charAt(i) == '(') {
+                bracket++;
+                if (token.length() > 0) {
+                    token = FilterSpace(token);
+                    tagStack.push(new MyNode(token));
+                    token = "";
+                } else {
+                    continue;
+                }
+            } else if (sentence.charAt(i) == ')') {
+                bracket--;
+                if (token.length() > 0) {
+                    token = FilterSpace(token);
+                    String[] temps = token.split("\\s+");
+                    if (temps.length != 2) {
+                        System.out.println("Token has problem: " + token);
+                    }
+                    tagStack.push(new MyNode(temps[0]));
+                    token = "";
+                }
+                if (tagStack.isEmpty()) {
+                    continue;
+                }
+
+                MyNode child = tagStack.pop();
+                // because child node pop up, we know all its children
+                // in BuildCFGs(), child is actually the parent
+
+                if (!tagStack.isEmpty()) {
+                    MyNode parent = tagStack.peek();
+                    parent.childrenPointer.add(child);
+                } else {
+                    root = child;
+                    // already reach root
+                    // add dummy node
+//                    MyNode dummy = new MyNode("SENTENCE");
+//                    dummy.children.add(child.GetName());
+                    continue;
+                }
+
+            } else if (sentence.charAt(i) == ' ') {
+                if (token.length() == 0) {
+                    continue;
+                } else {
+                    token += sentence.charAt(i);
+                }
+            } else {
+                token += sentence.charAt(i);
+            }
+        }
+        return root;
+    }
+
+    private List<String> countRules(MyNode node) {
+        List<String> result = new ArrayList<String>();
+        if (node == null) {
+            return result;
+        }
+        helper(node, result);
+        return result;
+    }
+
+    private void helper(MyNode node, List<String> result) {
+        if (node.childrenPointer.size() == 0) {
+            return;
+        }
+        for (MyNode child: node.childrenPointer) {
+            helper(child, result);
+        }
+        for (MyNode child: node.childrenPointer) {
+            if (child.leaf.size() == 0) {
+                node.leaf.add(child);
+            }
+            else {
+                for (MyNode n: child.leaf) {
+                    node.leaf.add(n);
+                }
+            }
+        }
+        StringBuilder builder = new StringBuilder();
+        for (MyNode n: node.leaf) {
+            builder.append(n.GetName() + "\t");
+        }
+        result.add(builder.toString());
+    }
+
+    private String FilterSpace(String token) {
+        int begin = 0;
+        int end = token.length() - 1;
+        while (begin < token.length()) {
+            if (token.charAt(begin) == ' ') {
+                begin++;
+            } else {
+                break;
+            }
+        }
+        while (end >= begin) {
+            if (token.charAt(end) == ' ') {
+                end--;
+            } else {
+                break;
+            }
+        }
+        if (begin == token.length()-1) {
+            System.out.println("Token has problem: " + token);  // for debug
+            return "";
+        }
+        return token.substring(begin, end+1);
+    }
+
     private void ProcessOneFile(File file) {
         String content = GetFileContent(file);
         FileType fileType = null;
@@ -216,7 +401,7 @@ public class Scorer {
         String goldFolder = args[0];
         String ownFile = args[1];
         Scorer scorer = new Scorer(goldFolder);
-        scorer.run(ownFile);
+        scorer.runParseval(ownFile);
     }
 }
 
